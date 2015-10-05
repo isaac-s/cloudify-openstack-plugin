@@ -25,6 +25,7 @@ from cloudify.manager import get_rest_client
 from cloudify.decorators import operation
 from cloudify.exceptions import NonRecoverableError, RecoverableError
 from cinder_plugin import volume
+from server_group import SERVER_GROUP_OPENSTACK_TYPE
 from openstack_plugin_common import (
     provider,
     transform_resource_name,
@@ -34,6 +35,7 @@ from openstack_plugin_common import (
     with_cinder_client,
     get_openstack_id_of_single_connected_node_by_openstack_type,
     get_single_connected_node_by_openstack_type,
+    get_resource_by_name_or_id,
     is_external_resource,
     is_external_resource_by_properties,
     use_external_resource,
@@ -225,6 +227,25 @@ def create(nova_client, neutron_client, args, **kwargs):
         server['nics'] = server.get('nics', []) + nics
     # Multi-NIC by ports - end
 
+    # If the server has a "cloudify.openstack.server_contained_in_group"
+    # relationship with a Server Group, then add the appropriate scheduler
+    # hints.
+    
+    connected_server_group_id = get_openstack_id_of_single_connected_node_by_openstack_type(ctx, SERVER_GROUP_OPENSTACK_TYPE, True)
+    
+    if connected_server_group_id:
+        sched_hints = server.get('scheduler_hints')
+        if sched_hints:
+            if 'group' in sched_hints:
+                raise NonRecoverableError(
+                    "'group' key under 'scheduler_hints' is forbidden when "
+                    "the server is connected to a Server Group through a relationship.")
+        else:
+            sched_hints = {}
+        connected_server_group = get_resource_by_name_or_id(
+            connected_server_group_id, SERVER_GROUP_OPENSTACK_TYPE, nova_client)
+        sched_hints['group'] = connected_server_group.runtime_attributes['cfy.server_group_name']
+    
     ctx.logger.debug(
         "server.create() server after transformations: {0}".format(server))
 

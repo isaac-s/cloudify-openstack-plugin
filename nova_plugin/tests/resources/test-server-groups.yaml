@@ -1,0 +1,46 @@
+tosca_definitions_version: cloudify_dsl_1_1
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/3.2.1/types.yaml
+  - ../../../plugin.yaml
+
+inputs:
+  private_key_path:
+    type: string
+
+node_templates:
+  management_network:
+    type: cloudify.openstack.nodes.Network
+    properties:
+      resource_id: test_network
+
+  server_group:
+    type: cloudify.openstack.nodes.ServerGroup
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          inputs:
+            args:
+              name: my_server_group
+              policies:
+                - anti-affinity
+
+  keypair:
+    type: cloudify.openstack.nodes.KeyPair
+    properties:
+      private_key_path: { get_input: private_key_path }
+
+  server:
+    type: cloudify.openstack.nodes.Server
+    properties:
+      image: 43804523-7e3b-4adf-b6df-9d11d451c463
+      flavor: 101
+      management_network_name: test_network
+      install_agent: false
+    relationships:
+      - target: management_network
+        type: cloudify.relationships.depends_on
+      - target: server_group
+        type: cloudify.openstack.server_contained_in_group
+      - target: keypair
+        type: cloudify.openstack.server_connected_to_keypair
