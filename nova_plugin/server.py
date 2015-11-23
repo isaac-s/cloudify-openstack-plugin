@@ -75,7 +75,7 @@ RUNTIME_PROPERTIES_KEYS = COMMON_RUNTIME_PROPERTIES_KEYS + \
 @operation
 @with_nova_client
 @with_neutron_client
-def create(nova_client, neutron_client, args, **kwargs):
+def create(nova_client, neutron_client, args, nic_ordering=[], **kwargs):
     """
     Creates a server. Exposes the parameters mentioned in
     http://docs.openstack.org/developer/python-novaclient/api/novaclient.v1_1
@@ -224,6 +224,40 @@ def create(nova_client, neutron_client, args, **kwargs):
 
         server['nics'] = server.get('nics', []) + nics
     # Multi-NIC by ports - end
+
+    # Re-order the nics:
+    # 1. Items specified in 'nic-ordering' will appear first, according to
+    #    their order.
+    # 2. All other items will come next, in whatever order they're already
+    #    in.
+
+    if hasattr(server, 'nics'):
+        ordered_nics = []
+        current_nics = server['nics']
+
+        for nic_item in nic_ordering:
+            nic_item_type = nic_item['type']
+            nic_item_name = nic_item['name']
+            nic_item_name = rename(nic_item_name)
+
+            if nic_item_type == 'network':
+                nic_item_id = neutron_client.cosmo_get_named(
+                    'network', nic_item_name)['id']
+            elif nic_item_type == 'port':
+                port_id = neutron_client.cosmo_get_named(
+                    'port', nic_item_name)['id']
+                nic_item_id = get_port_network_ids_(neutron_client, [port_id])[0]
+            else:
+                raise NonRecoverableError('Unknown nic item type: {}'.format(
+                    nic_item_type))
+            ordered_nics.append(nic_item_id)
+            current_nics.remove(nic_item_id)
+
+        ordered_nics.extend(current_nics)
+
+        ctx.logger.debug('NICs: before ordering={}, after ordering={}'.format(
+            server['nics'], ordered_nics))
+        server['nics'] = ordered_nics
 
     ctx.logger.debug(
         "server.create() server after transformations: {0}".format(server))
